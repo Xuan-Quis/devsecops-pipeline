@@ -1,0 +1,245 @@
+pipeline {
+    agent any 
+    tools {
+        maven 'Maven-3.8.3'
+        jdk 'JDK-17'
+    }
+    environment  {
+        SCANNER_HOME=tool 'sonar-scanner'
+        AWS_ACCOUNT_ID = credentials('AWS-ACCOUNT-ID')
+        AWS_ECR_REPO_NAME = credentials('ECR-backend-id')
+        AWS_DEFAULT_REGION = 'ap-southeast-1'
+        REPOSITORY_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/"
+        PROJECT_NAME = "spring-boot-ecommerce"
+        IMAGE_VERSION = "${PROJECT_NAME}:${BUILD_NUMBER}"
+        TRIVYFS_REPORT = "trivyfs_scan_${PROJECT_NAME}_${BUILD_NUMBER}_report"
+        TRIVY_IMAGE_REPORT = "security_scan_image_${PROJECT_NAME}_${BUILD_NUMBER}_report"
+        ARACHNI_WEBSITE_REPORT = "security_scan_website_${PROJECT_NAME}_${BUILD_NUMBER}_report"
+        K6_PERFORMANCE_TEST_REPORT = "performance_test_${PROJECT_NAME}_${BUILD_NUMBER}_report"
+    }
+    stages {
+        stage('Cleaning Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+        
+        stage('Checkout from Git') {
+            steps {
+                git branch: 'main', credentialsId: 'Git-cred', url: '<your-repo-url>'
+            }
+        }
+        
+        stage('Maven Build') {
+            steps {
+                dir('Fullstack-Ecommerce-Web/02-backend_spring-boot-rest-api') {
+                    sh 'mvn clean compile -DskipTests=true'
+                }
+            }
+        }
+        
+        stage('Unit Tests') {
+            steps {
+                dir('Fullstack-Ecommerce-Web/02-backend_spring-boot-rest-api') {
+                    sh 'mvn test'
+                }
+            }
+            post {
+                always {
+                    dir('Fullstack-Ecommerce-Web/02-backend_spring-boot-rest-api') {
+                        publishTestResults testResultsPattern: '**/target/surefire-reports/*.xml'
+                    }
+                }
+            }
+        }
+        
+        stage('Sonarqube Analysis') {
+            steps {
+                dir('Fullstack-Ecommerce-Web/02-backend_spring-boot-rest-api') {
+                    withSonarQubeEnv('sonar-server') {
+                        sh ''' $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=spring-boot-ecommerce \
+                        -Dsonar.projectKey=spring-boot-ecommerce \
+                        -Dsonar.sources=src/main/java \
+                        -Dsonar.tests=src/test/java \
+                        -Dsonar.java.binaries=target/classes \
+                        -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml '''
+                    }
+                }
+            }
+        }
+        
+        stage('Quality Check') {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token' 
+                }
+            }
+        }
+        
+        stage('OWASP Dependency-Check Scan') {
+            steps {
+                dir('Fullstack-Ecommerce-Web/02-backend_spring-boot-rest-api') {
+                    dependencyCheck additionalArguments: '--scan . --disableYarnAudit --disableNodeAudit --format HTML --format JSON', odcInstallation: 'DP-Check'
+                    dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+                }
+            }
+        }
+        
+        stage('Trivy File Scan') {
+            steps {
+                dir('Fullstack-Ecommerce-Web/02-backend_spring-boot-rest-api') {
+                    sh 'trivy fs . --severity HIGH,CRITICAL --format template --template "@contrib/html.tpl" --output ${TRIVYFS_REPORT}.html'
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: "${TRIVYFS_REPORT}.html", allowEmptyArchive: true
+                }
+            }
+        }
+        
+        stage('Snyk Security Scan') {
+            steps {
+                dir('Fullstack-Ecommerce-Web/02-backend_spring-boot-rest-api') {
+                    withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
+                        sh '''
+                            docker build --rm --network host --build-arg SNYK_AUTH_TOKEN=$SNYK_TOKEN --build-arg OUTPUT_FILENAME=snyk_scan_report -t snyk_scan_report -f Dockerfile-snyk .
+                            docker create --name snyk_scan_report snyk_scan_report
+                            docker cp snyk_scan_report:/app/snyk_scan_report.html .
+                            docker rm snyk_scan_report
+                        '''
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: "snyk_scan_report.html", allowEmptyArchive: true
+                }
+            }
+        }
+        
+        stage("Docker Image Build") {
+            steps {
+                script {
+                    dir('Fullstack-Ecommerce-Web/02-backend_spring-boot-rest-api') {
+                        sh 'docker system prune -f'
+                        sh 'docker container prune -f'
+                        sh 'docker build -t ${AWS_ECR_REPO_NAME} .'
+                    }
+                }
+            }
+        }
+        
+        stage("ECR Image Pushing") {
+            steps {
+                script {
+                    sh 'aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${REPOSITORY_URI}'
+                    sh 'docker tag ${AWS_ECR_REPO_NAME} ${REPOSITORY_URI}${AWS_ECR_REPO_NAME}:${BUILD_NUMBER}'
+                    sh 'docker push ${REPOSITORY_URI}${AWS_ECR_REPO_NAME}:${BUILD_NUMBER}'
+                }
+            }
+        }
+        
+        stage("TRIVY Image Scan") {
+            steps {
+                sh 'trivy image --format template --template "@contrib/html.tpl" --output ${TRIVY_IMAGE_REPORT}.html ${REPOSITORY_URI}${AWS_ECR_REPO_NAME}:${BUILD_NUMBER}'
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: "${TRIVY_IMAGE_REPORT}.html", allowEmptyArchive: true
+                }
+            }
+        }
+        
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    // Deploy to Kubernetes cluster
+                    sh '''
+                        kubectl set image deployment/ecommerce-backend ecommerce-backend=${REPOSITORY_URI}${AWS_ECR_REPO_NAME}:${BUILD_NUMBER} -n ecommerce
+                        kubectl rollout status deployment/ecommerce-backend -n ecommerce
+                    '''
+                }
+            }
+        }
+        
+        stage('Security Scan Website') {
+            when {
+                expression { env.ADDRESS_FRONTEND != null }
+            }
+            steps {
+                script {
+                    sh '''
+                        docker run --rm -v /tmp/:/tmp/ devopseduvn/arachni:v1.4-0.5.10 bin/arachni --output-verbose --scope-include-subdomains ${ADDRESS_FRONTEND} --report-save-path=/tmp/${ARACHNI_WEBSITE_REPORT}.afr > /dev/null 2>&1
+                        docker run --rm -v /tmp/:/tmp/ devopseduvn/arachni:v1.4-0.5.10 bin/arachni_reporter /tmp/${ARACHNI_WEBSITE_REPORT}.afr --reporter=html:outfile=/tmp/${ARACHNI_WEBSITE_REPORT}.html.zip
+                        cp /tmp/${ARACHNI_WEBSITE_REPORT}.html.zip .
+                    '''
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: "${ARACHNI_WEBSITE_REPORT}.html.zip", allowEmptyArchive: true
+                }
+            }
+        }
+        
+        stage('Performance Testing with K6') {
+            when {
+                expression { env.ADDRESS_FRONTEND != null }
+            }
+            steps {
+                script {
+                    sh '''
+                        docker run --rm -v $(pwd):/scripts -i grafana/k6 run --out json=/scripts/${K6_PERFORMANCE_TEST_REPORT}.json /scripts/performance-test.js
+                        docker run --rm -v $(pwd):/scripts -i grafana/k6 run --out influxdb=http://influxdb:8086/k6 /scripts/performance-test.js
+                    '''
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: "${K6_PERFORMANCE_TEST_REPORT}.json", allowEmptyArchive: true
+                }
+            }
+        }
+        
+        stage('Update Deployment file') {
+            environment {
+                GIT_REPO_NAME = "<your-repo-name>"
+                GIT_USER_NAME = "<your-name>"
+            }
+            steps {
+                dir('kubernetes-manifest/backend') {
+                    withCredentials([string(credentialsId: 'GITHUB', variable: 'Git-cred')]) {
+                        sh '''
+                            git config user.email "<your-email>"
+                            git config user.name "<your-name>"
+                            BUILD_NUMBER=${BUILD_NUMBER}
+                            echo $BUILD_NUMBER
+                            imageTag=$(grep -oP '(?<=backend:)[^ ]+' backend-deployment.yaml)
+                            echo $imageTag
+                            sed -i "s/${AWS_ECR_REPO_NAME}:${imageTag}/${AWS_ECR_REPO_NAME}:${BUILD_NUMBER}/" backend-deployment.yaml
+                            git add backend-deployment.yaml
+                            git commit -m "Update deployment Image to version \${BUILD_NUMBER}"
+                            git push https://<your-name>:<PAT-TOKEN>@github.com/<your-name>/<your-repo-name> HEAD:main
+                        '''
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            // Cleanup
+            sh 'docker system prune -f || true'
+            sh 'docker container prune -f || true'
+        }
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
+        }
+    }
+}

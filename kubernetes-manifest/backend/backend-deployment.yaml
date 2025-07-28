@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: ecommerce-backend
+  name: ecommerce-backend
+  namespace: ecommerce
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 10 # số lượng version được giữ lại
+  selector:
+    matchLabels:
+      app: ecommerce-backend
+  template:
+    metadata:
+      labels:
+        app: ecommerce-backend
+      namespace: ecommerce
+    spec:
+      imagePullSecrets:
+        - name: ecr-registry-secret
+      containers:
+        - image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${AWS_ECR_BACKEND_REPO_NAME}:latest
+          imagePullPolicy: Always
+          name: ecommerce-backend
+          # envFrom:
+          #   - secretRef:
+          #       name: ecommerce-backend-database-collection
+          #       optional: false
+          ports:
+            - containerPort: 8080
+              name: tcp
+              protocol: TCP
+          resources:
+            limits:
+              cpu: '1'
+              memory: 1028Mi
+            requests:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: application-properties-config-volume
+              mountPath: /run/src/main/resources/application.properties
+              subPath: application.properties
+      volumes:
+        - name: application-properties-config-volume
+          configMap:
+            name: ecommerce-backend-application-properties-configmap

@@ -1,0 +1,65 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: devsecops-project
+  namespace: argocd
+spec:
+  description: DevSecOps Project for EKS
+  sourceRepos:
+    - <your-repo-url>
+  destinations:
+    - namespace: default
+      server: https://kubernetes.default.svc
+    - namespace: argocd
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: ""
+      kind: ServiceAccount
+    - group: ""
+      kind: Secret
+    - group: ""
+      kind: ConfigMap
+    - group: ""
+      kind: Service
+    - group: apps
+      kind: Deployment
+    - group: apps
+      kind: StatefulSet
+    - group: networking.k8s.io
+      kind: Ingress
+    - group: storage.k8s.io
+      kind: PersistentVolumeClaim
+    - group: storage.k8s.io
+      kind: PersistentVolume
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: ConfigMap
+    - group: ""
+      kind: Secret
+    - group: ""
+      kind: Service
+    - group: apps
+      kind: Deployment
+    - group: apps
+      kind: StatefulSet
+    - group: networking.k8s.io
+      kind: Ingress
+    - group: storage.k8s.io
+      kind: PersistentVolumeClaim
+  roles:
+    - name: admin
+      description: Admin role for devsecops project
+      policies:
+        - p, proj:devsecops-project:admin, applications, *, *, allow
+        - p, proj:devsecops-project:admin, repositories, *, *, allow
+      groups:
+        - admin
+    - name: developer
+      description: Developer role for devsecops project
+      policies:
+        - p, proj:devsecops-project:developer, applications, get, *, allow
+        - p, proj:devsecops-project:developer, applications, sync, *, allow
+      groups:
+        - developers 

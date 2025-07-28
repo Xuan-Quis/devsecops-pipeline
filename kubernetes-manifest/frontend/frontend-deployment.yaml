@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: ecommerce-frontend
+  name: ecommerce-frontend
+  namespace: ecommerce
+spec:
+  replicas: 2
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 10 # số lượng version được giữ lại
+  selector:
+    matchLabels:
+      app: ecommerce-frontend
+  template:
+    metadata:
+      labels:
+        app: ecommerce-frontend
+      namespace: ecommerce
+    spec:
+      containers:
+        - imagePullSecrets:
+            - name: ecr-registry-secret
+        - image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${AWS_ECR_FRONTEND_REPO_NAME}:latest
+          imagePullPolicy: Always
+          name: ecommerce-frontend
+          ports:
+            - containerPort: 80
+              name: tcp
+              protocol: TCP
