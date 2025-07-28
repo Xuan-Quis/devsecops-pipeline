@@ -56,6 +56,55 @@ devsecops/
 ├── Jenkins-Server-TF/      # Hạ tầng máy chủ Jenkins
 └── kubernetes-manifest/    # Manifest triển khai Kubernetes
 ```
+## Pipeline Backend DevSecOps
+
+## Chi Tiết Các Giai Đoạn
+
+### 1. **Development & Source Control**
+- Developer push code lên Git repository
+- Jenkins tự động trigger pipeline khi có thay đổi
+
+### 2. **Build & Test Stage**
+- **Code Checkout**: Lấy code từ Git
+- **Maven Build**: Build ứng dụng Spring Boot
+- **Unit Tests**: Chạy test cases
+- **Code Quality**: Kiểm tra chất lượng code (SonarQube)
+
+### 3. **Security Scanning**
+- **Static Analysis**: Quét lỗ hổng trong code
+- **Dependency Check**: Kiểm tra dependencies
+- **Container Scan**: Quét bảo mật Docker image
+
+### 4. **Container & Registry**
+- **Docker Build**: Tạo container image
+- **ECR Push**: Đẩy image lên AWS ECR
+- **Image Security**: Quét bảo mật image
+
+### 5. **Deployment**
+- **EKS Deployment**: Triển khai lên Kubernetes cluster
+- **ArgoCD Sync**: Đồng bộ với GitOps
+- **Health Check**: Kiểm tra ứng dụng hoạt động
+
+### 6. **Monitoring & Rollback**
+- **Production Monitoring**: Giám sát ứng dụng
+- **Auto Rollback**: Tự động rollback nếu có lỗi
+- **Team Notification**: Thông báo cho team
+
+## Công Cụ Sử Dụng
+
+| Giai Đoạn | Công Cụ | Mục Đích |
+|------------|---------|----------|
+| Source Control | Git | Quản lý code |
+| CI/CD | Jenkins | Tự động hóa pipeline |
+| Build | Maven | Build ứng dụng Java |
+| Testing | JUnit | Unit testing |
+| Code Quality | SonarQube | Kiểm tra chất lượng |
+| Security | OWASP ZAP | Quét bảo mật |
+| Container | Docker | Containerization |
+| Registry | AWS ECR | Lưu trữ images |
+| Orchestration | Kubernetes/EKS | Quản lý containers |
+| GitOps | ArgoCD | Continuous deployment |
+| Monitoring | Prometheus/Grafana | Giám sát ứng dụng |
 
 ## Tính Năng Chính
 - **Kiến Trúc Đa Tầng**: Frontend, Backend và Database
